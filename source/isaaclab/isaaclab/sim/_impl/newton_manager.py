@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import ctypes
 import numpy as np
 import re
 
@@ -63,7 +64,10 @@ class NewtonManager:
     _gravity_vector: tuple[float, float, float] = (0.0, 0.0, -9.81)
     _up_axis: str = "Z"
     _num_envs: int = None
-    _model_changes: set[int] = set()
+    _visualizer_update_counter: int = 0
+    _visualizer_update_frequency: int = 1  # Configurable frequency for all rendering updates
+    _visualizer_train_mode: bool = True  # Whether visualizer is in training mode
+    _visualizer_disabled: bool = False  # Whether visualizer has been disabled by user
 
     @classmethod
     def clear(cls):
@@ -92,7 +96,9 @@ class NewtonManager:
             NewtonManager._cfg = None
         NewtonManager._up_axis = "Z"
         NewtonManager._first_call = True
-        NewtonManager._model_changes = set()
+        NewtonManager._visualizer_update_counter = 0
+        NewtonManager._visualizer_disabled = False
+        NewtonManager._visualizer_update_frequency = NewtonManager._cfg.newton_viewer_update_frequency
 
     @classmethod
     def set_builder(cls, builder):
