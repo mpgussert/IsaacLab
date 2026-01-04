@@ -23,3 +23,9 @@ __version__ = ISAACLAB_METADATA["package"]["version"]
 class Backend(IntEnum):
     NEWTON = 0
     PHYSX = 1
+
+
+# Note: controllers and devices modules are available but not eagerly imported
+# to avoid dependency issues. Import them explicitly when needed:
+#   from isaaclab import controllers
+#   from isaaclab import devices

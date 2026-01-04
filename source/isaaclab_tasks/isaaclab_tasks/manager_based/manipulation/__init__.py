@@ -3,4 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from .lift import *
+from .pick_place import *
 from .reach import *
+from .stack import *

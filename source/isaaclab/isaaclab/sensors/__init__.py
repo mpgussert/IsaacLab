@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -37,5 +37,9 @@ interpretation of the prim paths for different sensor types:
 
 from .camera import *  # noqa: F401, F403
 from .contact_sensor import *  # noqa: F401, F403
+from .frame_transformer import *  # noqa: F401
+# Note: imu and ray_caster commented out due to warp compatibility issues with Newton
+# from .imu import *  # noqa: F401, F403
+# from .ray_caster import *  # noqa: F401, F403
 from .sensor_base import SensorBase  # noqa: F401
 from .sensor_base_cfg import SensorBaseCfg  # noqa: F401

@@ -1,19 +1,21 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
 
-# from isaaclab.controllers import DifferentialIKControllerCfg, OperationalSpaceControllerCfg
+from isaaclab.controllers import DifferentialIKControllerCfg, OperationalSpaceControllerCfg
 from isaaclab.managers.action_manager import ActionTerm, ActionTermCfg
 from isaaclab.utils import configclass
 
-from . import (  # surface_gripper_actions,; task_space_actions,
+from . import (
     binary_joint_actions,
     joint_actions,
     joint_actions_to_limits,
     non_holonomic_actions,
+    surface_gripper_actions,
+    task_space_actions,
 )
 
 ##
@@ -264,8 +266,33 @@ class DifferentialInverseKinematicsActionCfg(ActionTermCfg):
     See :class:`DifferentialInverseKinematicsAction` for more details.
     """
 
-    def __post_init__(self):
-        raise NotImplementedError("DifferentialInverseKinematicsAction is not implemented for newton.")
+    @configclass
+    class OffsetCfg:
+        """The offset pose from parent frame to child frame.
+
+        On many robots, end-effector frames are fictitious frames that do not have a corresponding
+        rigid body. In such cases, it is easier to define this transform w.r.t. their parent rigid body.
+        For instance, for the Franka Emika arm, the end-effector is defined at an offset to the the
+        "panda_hand" frame.
+        """
+
+        pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        """Translation w.r.t. the parent frame. Defaults to (0.0, 0.0, 0.0)."""
+        rot: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+        """Quaternion rotation ``(w, x, y, z)`` w.r.t. the parent frame. Defaults to (1.0, 0.0, 0.0, 0.0)."""
+
+    class_type: type[ActionTerm] = task_space_actions.DifferentialInverseKinematicsAction
+
+    joint_names: list[str] = MISSING
+    """List of joint names or regex expressions that the action will be mapped to."""
+    body_name: str = MISSING
+    """Name of the body or frame for which IK is performed."""
+    body_offset: OffsetCfg | None = None
+    """Offset of target frame w.r.t. to the body frame. Defaults to None, in which case no offset is applied."""
+    scale: float | tuple[float, ...] = 1.0
+    """Scale factor for the action. Defaults to 1.0."""
+    controller: DifferentialIKControllerCfg = MISSING
+    """The configuration for the differential IK controller."""
 
 
 @configclass
@@ -275,8 +302,59 @@ class OperationalSpaceControllerActionCfg(ActionTermCfg):
     See :class:`OperationalSpaceControllerAction` for more details.
     """
 
-    def __post_init__(self):
-        raise NotImplementedError("OperationalSpaceControllerAction is not implemented for newton.")
+    @configclass
+    class OffsetCfg:
+        """The offset pose from parent frame to child frame.
+
+        On many robots, end-effector frames are fictitious frames that do not have a corresponding
+        rigid body. In such cases, it is easier to define this transform w.r.t. their parent rigid body.
+        For instance, for the Franka Emika arm, the end-effector is defined at an offset to the the
+        "panda_hand" frame.
+        """
+
+        pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        """Translation w.r.t. the parent frame. Defaults to (0.0, 0.0, 0.0)."""
+        rot: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+        """Quaternion rotation ``(w, x, y, z)`` w.r.t. the parent frame. Defaults to (1.0, 0.0, 0.0, 0.0)."""
+
+    class_type: type[ActionTerm] = task_space_actions.OperationalSpaceControllerAction
+
+    joint_names: list[str] = MISSING
+    """List of joint names or regex expressions that the action will be mapped to."""
+
+    body_name: str = MISSING
+    """Name of the body or frame for which motion/force control is performed."""
+
+    body_offset: OffsetCfg | None = None
+    """Offset of target frame w.r.t. to the body frame. Defaults to None, in which case no offset is applied."""
+
+    task_frame_rel_path: str = None
+    """The path of a ``RigidObject``, relative to the sub-environment, representing task frame. Defaults to None."""
+
+    controller_cfg: OperationalSpaceControllerCfg = MISSING
+    """The configuration for the operational space controller."""
+
+    position_scale: float = 1.0
+    """Scale factor for the position targets. Defaults to 1.0."""
+
+    orientation_scale: float = 1.0
+    """Scale factor for the orientation (quad for ``pose_abs`` or axis-angle for ``pose_rel``). Defaults to 1.0."""
+
+    wrench_scale: float = 1.0
+    """Scale factor for the wrench targets. Defaults to 1.0."""
+
+    stiffness_scale: float = 1.0
+    """Scale factor for the stiffness commands. Defaults to 1.0."""
+
+    damping_ratio_scale: float = 1.0
+    """Scale factor for the damping ratio commands. Defaults to 1.0."""
+
+    nullspace_joint_pos_target: str = "none"
+    """The joint targets for the null-space control: ``"none"``, ``"zero"``, ``"default"``, ``"center"``.
+
+    Note: Functional only when ``nullspace_control`` is set to ``"position"`` within the
+        ``OperationalSpaceControllerCfg``.
+    """
 
 
 ##
@@ -291,5 +369,11 @@ class SurfaceGripperBinaryActionCfg(ActionTermCfg):
     See :class:`SurfaceGripperBinaryAction` for more details.
     """
 
-    def __post_init__(self):
-        raise NotImplementedError("SurfaceGripperBinaryAction is not implemented for newton.")
+    asset_name: str = MISSING
+    """Name of the surface gripper asset in the scene."""
+    open_command: float = -1.0
+    """The command value to open the gripper. Defaults to -1.0."""
+    close_command: float = 1.0
+    """The command value to close the gripper. Defaults to 1.0."""
+
+    class_type: type[ActionTerm] = surface_gripper_actions.SurfaceGripperBinaryAction
