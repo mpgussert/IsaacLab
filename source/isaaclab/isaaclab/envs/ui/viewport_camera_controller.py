@@ -187,7 +187,9 @@ class ViewportCameraController:
                 f"'{body_name}' is not a body of Asset '{asset_name}'. Available bodies: {asset.body_names}."
             )
         # get the body index
-        body_id, _ = asset.find_bodies(body_name)
+        # Newton returns (mask, names, indices) while main returns (indices, names)
+        _, _, body_ids = asset.find_bodies(body_name)
+        body_id = body_ids[0]  # Get the single body index
         # update the asset name
         self.cfg.asset_name = asset_name
         # set origin type to asset_body

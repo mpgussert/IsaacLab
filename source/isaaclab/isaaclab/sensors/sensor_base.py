@@ -247,7 +247,13 @@ class SensorBase(ABC):
         self._device = sim.device
         self._backend = sim.backend
         self._sim_physics_dt = sim.get_physics_dt()
-        self._num_envs = NewtonManager._num_envs
+        # Get num_envs: try NewtonManager first, fallback to counting prims
+        if NewtonManager._num_envs is not None:
+            self._num_envs = NewtonManager._num_envs
+        else:
+            # Count the number of matching prims to determine num_envs
+            matching_prims = sim_utils.find_matching_prims(self.cfg.prim_path)
+            self._num_envs = len(matching_prims)
         # Boolean tensor indicating whether the sensor data has to be refreshed
         self._is_outdated = torch.ones(self._num_envs, dtype=torch.bool, device=self._device)
         # Current timestamp (in seconds)

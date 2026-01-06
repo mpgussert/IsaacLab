@@ -68,7 +68,8 @@ class PinkInverseKinematicsAction(ActionTerm):
     def _initialize_joint_info(self) -> None:
         """Initialize joint IDs and names based on configuration."""
         # Resolve pink controlled joints
-        self._isaaclab_controlled_joint_ids, self._isaaclab_controlled_joint_names = self._asset.find_joints(
+        # Newton returns (mask, names, indices) while main returns (indices, names)
+        _, self._isaaclab_controlled_joint_names, self._isaaclab_controlled_joint_ids = self._asset.find_joints(
             self.cfg.pink_controlled_joint_names
         )
         self.cfg.controller.joint_names = self._isaaclab_controlled_joint_names
@@ -76,7 +77,8 @@ class PinkInverseKinematicsAction(ActionTerm):
         self.cfg.controller.all_joint_names = self._asset.data.joint_names
 
         # Resolve hand joints
-        self._hand_joint_ids, self._hand_joint_names = self._asset.find_joints(self.cfg.hand_joint_names)
+        # Newton returns (mask, names, indices) while main returns (indices, names)
+        _, self._hand_joint_names, self._hand_joint_ids = self._asset.find_joints(self.cfg.hand_joint_names)
 
         # Combine all joint information
         self._controlled_joint_ids = self._isaaclab_controlled_joint_ids + self._hand_joint_ids

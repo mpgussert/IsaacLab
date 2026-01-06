@@ -11,7 +11,6 @@ import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from isaacsim.core.simulation_manager import SimulationManager
 from pxr import UsdPhysics
 
 import isaaclab.sim as sim_utils
@@ -34,6 +33,14 @@ if TYPE_CHECKING:
 
 # import logger
 logger = logging.getLogger(__name__)
+
+# Try to import SimulationManager for PhysX backend (may not be available in Newton)
+try:
+    from isaacsim.core.simulation_manager import SimulationManager
+    _HAS_SIMULATION_MANAGER = True
+except ImportError:
+    _HAS_SIMULATION_MANAGER = False
+    SimulationManager = None
 
 
 class FrameTransformer(SensorBase):
@@ -136,6 +143,30 @@ class FrameTransformer(SensorBase):
             A tuple of lists containing the body indices and names.
         """
         return string_utils.resolve_matching_names(name_keys, self._target_frame_names, preserve_order)
+
+    def set_articulation(self, articulation) -> None:
+        """Set the articulation reference for Newton backend.
+
+        This method should be called by the scene after creating the sensor when running with Newton.
+
+        Args:
+            articulation: The articulation containing the tracked body frames.
+        """
+        if not hasattr(self, "_use_newton_backend") or not self._use_newton_backend:
+            logger.warning("set_articulation called but not using Newton backend - ignoring")
+            return
+
+        self._newton_articulation = articulation
+
+        # Build body name to index mapping
+        body_names = articulation.body_names
+        for body_name in self._newton_tracked_body_names:
+            if body_name in body_names:
+                self._newton_body_indices[body_name] = body_names.index(body_name)
+            else:
+                raise ValueError(
+                    f"Body '{body_name}' not found in articulation. Available bodies: {body_names}"
+                )
 
     """
     Implementation.
@@ -248,15 +279,41 @@ class FrameTransformer(SensorBase):
 
         body_names_regex = [tracked_prim_path.replace("env_0", "env_*") for tracked_prim_path in tracked_prim_paths]
 
-        # obtain global simulation view
-        self._physics_sim_view = SimulationManager.get_physics_sim_view()
-        # Create a prim view for all frames and initialize it
-        # order of transforms coming out of view will be source frame followed by target frame(s)
-        self._frame_physx_view = self._physics_sim_view.create_rigid_body_view(body_names_regex)
+        # Check if we're running with Newton (no PhysX simulation view)
+        self._use_newton_backend = False
+        self._physics_sim_view = None
+        self._frame_physx_view = None
 
-        # Determine the order in which regex evaluated body names so we can later index into frame transforms
-        # by frame name correctly
-        all_prim_paths = self._frame_physx_view.prim_paths
+        if _HAS_SIMULATION_MANAGER and SimulationManager is not None:
+            self._physics_sim_view = SimulationManager.get_physics_sim_view()
+
+        if self._physics_sim_view is not None:
+            # PhysX backend - use rigid body view
+            # Create a prim view for all frames and initialize it
+            # order of transforms coming out of view will be source frame followed by target frame(s)
+            self._frame_physx_view = self._physics_sim_view.create_rigid_body_view(body_names_regex)
+            all_prim_paths = self._frame_physx_view.prim_paths
+        else:
+            # Newton backend - use articulation body data
+            self._use_newton_backend = True
+            logger.info("FrameTransformer: Using Newton backend for body transforms")
+
+            # For Newton, we need to find the parent articulation and get body indices
+            # Store the tracked body names for later use
+            self._newton_tracked_body_names = tracked_body_names
+            
+            # Store articulation reference (will be set by scene or found dynamically)
+            self._newton_articulation = None
+            # Store body indices for the tracked bodies
+            self._newton_body_indices = {}
+
+            # Build list of prim paths for each environment
+            # Use tracked_prim_paths as template and expand for all envs
+            all_prim_paths = []
+            for env_idx in range(self._num_envs):
+                for prim_path in tracked_prim_paths:
+                    env_prim_path = prim_path.replace("env_0", f"env_{env_idx}")
+                    all_prim_paths.append(env_prim_path)
 
         if "env_" in all_prim_paths[0]:
 
@@ -367,15 +424,20 @@ class FrameTransformer(SensorBase):
         if len(env_ids) == self._num_envs:
             env_ids = ...
 
-        # Extract transforms from view - shape is:
-        # (the total number of source and target body frames being tracked * self._num_envs, 7)
-        transforms = self._frame_physx_view.get_transforms()
+        if self._use_newton_backend:
+            # Newton backend - get transforms from articulation body data
+            transforms = self._get_newton_transforms()
+        else:
+            # PhysX backend - get transforms from rigid body view
+            # Extract transforms from view - shape is:
+            # (the total number of source and target body frames being tracked * self._num_envs, 7)
+            transforms = self._frame_physx_view.get_transforms()
 
-        # Reorder the transforms to be per environment as is expected of SensorData
-        transforms = transforms[self._per_env_indices]
+            # Reorder the transforms to be per environment as is expected of SensorData
+            transforms = transforms[self._per_env_indices]
 
-        # Convert quaternions as PhysX uses xyzw form
-        transforms[:, 3:] = convert_quat(transforms[:, 3:], to="wxyz")
+            # Convert quaternions as PhysX uses xyzw form
+            transforms[:, 3:] = convert_quat(transforms[:, 3:], to="wxyz")
 
         # Process source frame transform
         source_frames = transforms[self._source_frame_body_ids]
@@ -482,6 +544,124 @@ class FrameTransformer(SensorBase):
     """
     Internal helpers.
     """
+
+    def _get_newton_transforms(self) -> torch.Tensor:
+        """Get body transforms from Newton state data.
+
+        Returns:
+            A tensor of shape (num_envs * num_tracked_bodies, 7) containing position and quaternion.
+        """
+        import warp as wp
+        from isaaclab.sim._impl.newton_manager import NewtonManager
+
+        # Lazy initialization: Find the articulation from prim paths if not set
+        if self._newton_articulation is None:
+            self._find_and_set_articulation()
+
+        # Get body transforms from Newton state
+        # Newton stores body X (world transform) in the state
+        state = NewtonManager.get_state_0()
+        if state is None:
+            raise RuntimeError("Newton state not available")
+
+        # Get body transforms - Newton uses body_X_wb for world body transforms
+        # shape: (num_bodies,) with dtype=wp.transformf
+        body_X_wb = state.body_X_wb
+
+        # Convert to torch tensor
+        # Each transform is a 7-element array (pos xyz + quat xyzw)
+        body_transforms = wp.to_torch(body_X_wb)  # (num_bodies, 7)
+
+        # Build transforms tensor for tracked bodies
+        num_tracked = len(self._newton_tracked_body_names)
+        transforms = torch.zeros(self._num_envs * num_tracked, 7, device=self._device)
+
+        # Newton stores all bodies across all environments in a flat array
+        model = NewtonManager._model
+        num_bodies_per_env = len(model.body_name) // self._num_envs if self._num_envs > 0 else len(model.body_name)
+
+        for i, body_name in enumerate(self._newton_tracked_body_names):
+            body_idx_base = self._newton_body_indices[body_name]
+            for env_idx in range(self._num_envs):
+                # Calculate the actual body index in the flattened Newton array
+                newton_body_idx = env_idx * num_bodies_per_env + body_idx_base
+                flat_idx = env_idx * num_tracked + i
+
+                # Newton transform is (pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w)
+                transform = body_transforms[newton_body_idx]
+                transforms[flat_idx, :3] = transform[:3]  # position
+                # Convert quaternion from xyzw to wxyz
+                transforms[flat_idx, 3:] = convert_quat(transform[3:].unsqueeze(0), to="wxyz").squeeze(0)
+
+        return transforms
+
+    def _find_and_set_articulation(self) -> None:
+        """Find the parent articulation by traversing the USD hierarchy.
+
+        This is called lazily on first update when running with Newton backend.
+        """
+        from pxr import UsdPhysics, Usd
+
+        # Get the stage and find the prim for the source frame
+        stage = sim_utils.get_current_stage()
+        source_prim_path = self.cfg.prim_path.replace("{ENV_REGEX_NS}", "/World/envs/env_0")
+        source_prim = stage.GetPrimAtPath(source_prim_path)
+
+        if not source_prim.IsValid():
+            raise RuntimeError(f"Could not find prim at path: {source_prim_path}")
+
+        # Traverse up the hierarchy to find the articulation root
+        current_prim = source_prim
+        articulation_root_prim = None
+        while current_prim.IsValid():
+            if current_prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+                articulation_root_prim = current_prim
+                break
+            current_prim = current_prim.GetParent()
+
+        if articulation_root_prim is None:
+            raise RuntimeError(
+                f"Could not find articulation root in hierarchy above {source_prim_path}"
+            )
+
+        # Get the articulation prim path
+        articulation_prim_path = articulation_root_prim.GetPath().pathString
+        logger.info(f"Found articulation root at: {articulation_prim_path}")
+
+        # Now we need to find the Articulation object from the scene
+        # The scene stores articulations but the sensor doesn't have access to it
+        # We'll need to use the NewtonManager to look up the articulation
+        from isaaclab.sim._impl.newton_manager import NewtonManager
+
+        # Get the model from Newton - it should have body information
+        model = NewtonManager._model
+        if model is None:
+            raise RuntimeError("Newton model not initialized")
+
+        # Store body indices for direct access from Newton state
+        # The body names in Newton match the link names from the articulation
+        # We need to find the indices of our tracked bodies in the Newton model
+        body_names = model.body_name
+        self._newton_body_indices = {}
+        for body_name in self._newton_tracked_body_names:
+            if body_name in body_names:
+                self._newton_body_indices[body_name] = body_names.index(body_name)
+            else:
+                # Try to find partial match (body might have different naming)
+                found = False
+                for i, name in enumerate(body_names):
+                    if body_name in name or name.endswith(body_name):
+                        self._newton_body_indices[body_name] = i
+                        found = True
+                        break
+                if not found:
+                    raise ValueError(
+                        f"Body '{body_name}' not found in Newton model. Available bodies: {body_names}"
+                    )
+
+        # Mark that we found the articulation (use model instead)
+        self._newton_articulation = model
+        logger.info(f"FrameTransformer: Connected to Newton model with body indices: {self._newton_body_indices}")
 
     def _get_connecting_lines(
         self, start_pos: torch.Tensor, end_pos: torch.Tensor

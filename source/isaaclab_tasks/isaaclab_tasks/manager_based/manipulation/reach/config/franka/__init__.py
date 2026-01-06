@@ -38,3 +38,25 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
+
+##
+# Differential IK Control (for teleoperation)
+##
+
+gym.register(
+    id="Isaac-Reach-Franka-IK-Rel-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:FrankaReachIKEnvCfg",
+    },
+)
+
+gym.register(
+    id="Isaac-Reach-Franka-IK-Rel-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:FrankaReachIKEnvCfg_PLAY",
+    },
+)

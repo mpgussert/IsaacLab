@@ -132,8 +132,8 @@ class RmpFlowGalbotRightArmCubeStackEnvCfg(stack_joint_pos_env_cfg.GalbotRightAr
         self.decimation = 6
         self.episode_length_s = 30.0
 
-        # Enable CCD to avoid tunneling
-        self.sim.physx.enable_ccd = True
+        # Note: PhysX-specific settings removed for Newton compatibility
+        # self.sim.physx.enable_ccd = True
 
         self.teleop_devices = DevicesCfg(
             devices={

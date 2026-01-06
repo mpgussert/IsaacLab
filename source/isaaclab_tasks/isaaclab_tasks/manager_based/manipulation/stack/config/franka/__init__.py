@@ -120,3 +120,16 @@ gym.register(
     },
     disable_env_checker=True,
 )
+
+##
+# Pink IK - Newton Compatible
+##
+
+gym.register(
+    id="Isaac-Stack-Cube-Franka-Pink-IK-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.stack_pink_ik_env_cfg:FrankaCubeStackPinkIKEnvCfg",
+    },
+    disable_env_checker=True,
+)

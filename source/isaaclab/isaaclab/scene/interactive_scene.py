@@ -16,7 +16,7 @@ from pxr import Sdf
 import isaaclab.sim as sim_utils
 from isaaclab import cloner
 from isaaclab.assets import Articulation, ArticulationCfg, AssetBaseCfg
-from isaaclab.sensors import ContactSensorCfg, SensorBase, SensorBaseCfg
+from isaaclab.sensors import ContactSensorCfg, FrameTransformerCfg, SensorBase, SensorBaseCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.sim.prims import XFormPrim
 from isaaclab.sim.utils.stage import get_current_stage, get_current_stage_id
@@ -605,6 +605,14 @@ class InteractiveScene:
                                 contact_partners_shape_expr.format(ENV_REGEX_NS=self.env_regex_ns)
                             )
                         asset_cfg.filter_shape_paths_expr = updated_contact_partners_shape_expr
+                # Handle FrameTransformerCfg target_frames prim_path resolution
+                if isinstance(asset_cfg, FrameTransformerCfg):
+                    if asset_cfg.target_frames is not None:
+                        for target_frame in asset_cfg.target_frames:
+                            if hasattr(target_frame, "prim_path") and target_frame.prim_path is not None:
+                                target_frame.prim_path = target_frame.prim_path.format(
+                                    ENV_REGEX_NS=self.env_regex_ns
+                                )
 
                 self._sensors[asset_name] = asset_cfg.class_type(asset_cfg)
             elif isinstance(asset_cfg, AssetBaseCfg):
@@ -642,3 +650,5 @@ class InteractiveScene:
                     asset.cfg.prim_path = destinations_regex_ns
                 if isinstance(asset, XFormPrim):
                     asset._regex_prim_paths = [destinations_regex_ns]
+        # Note: FrameTransformers using Newton backend will lazily find their parent
+        # articulation on first update - no explicit setup needed here
